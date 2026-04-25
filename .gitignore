@@ -4,3 +4,12 @@ __pycache__/
 .env
 .vscode/
 .idea/
+
+# Project-specific ignores
+crot_engine.db
+.gemini/
+memory.md
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
