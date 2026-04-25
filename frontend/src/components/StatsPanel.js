@@ -2,9 +2,9 @@
 
 import React from 'react';
 
-function StatCard({ label, value, progressBarId }) {
+function StatCard({ label, value, progressBarId, className = '' }) {
   return (
-    <div className="stat-card">
+    <div className={`stat-card ${className}`}>
       <div className="stat-label">
         <span>{label}</span>
         <span>{value}%</span>
@@ -35,14 +35,14 @@ export default function StatsPanel({ isOpen, onClose, stats }) {
         <button className="btn-icon-top" style={{background:'transparent', border:'none'}} onClick={onClose}>✕</button>
       </div>
       
-      <StatCard label="CPU" value={stats.cpu || 0} progressBarId="cpuBar" />
-      <StatCard label="RAM" value={stats.ram || 0} progressBarId="ramBar" />
-      <StatCard label="GPU" value={stats.gpu || 0} progressBarId="gpuBar" />
+      <StatCard className="cpu-card" label="CPU" value={stats.cpu || 0} progressBarId="cpuBar" />
+      <StatCard className="ram-card" label="RAM" value={stats.ram || 0} progressBarId="ramBar" />
+      <StatCard className="gpu-card" label="GPU" value={stats.gpu || 0} progressBarId="gpuBar" />
       
       <label style={{fontSize:'11px', fontWeight:'bold', color:'var(--text-sub)', marginTop:'10px', display:'block'}}>PROVIDER USAGE</label>
       <div id="providerUsageList">
         {stats.provider_stats && stats.provider_stats.map(p => (
-            <div key={p.name} className="stat-card" style={{padding: '10px 15px', marginTop: '5px'}}>
+            <div key={p.name} className="stat-card provider-usage-card" style={{padding: '10px 15px', marginTop: '5px'}}>
                 <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
                     <span>{p.name}</span>
                     <span style={{color: '#4caf50', fontWeight: 'bold'}}>{formatCost(p.total_usage_cost)}</span>
@@ -52,7 +52,7 @@ export default function StatsPanel({ isOpen, onClose, stats }) {
       </div>
       
       <h3 style={{marginTop: '20px'}}>📈 Global</h3>
-      <div className="stat-card">
+      <div className="stat-card global-usage-card">
         <div className="stat-label">
             <span>Tokens</span>
             <b style={{color:'var(--accent)'}}>{stats.global_tokens || 0}</b>

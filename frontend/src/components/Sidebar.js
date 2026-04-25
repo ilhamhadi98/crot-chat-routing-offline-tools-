@@ -1,6 +1,8 @@
 'use client';
 
 export default function Sidebar({
+  isOpen,
+  onClose,
   providers,
   models,
   sessions,
@@ -9,11 +11,13 @@ export default function Sidebar({
   onModelChange,
   onSessionClick,
   onOpenSettings,
+  onDeleteSession,
   selectedProvider,
   selectedModel
 }) {
   return (
-    <div className="sidebar" id="sidebar">
+    <div className={`sidebar ${isOpen ? 'active' : ''}`} id="sidebar">
+      <button className="btn-close-sidebar" onClick={onClose}>✕</button>
       <div className="logo-minecraft-3d">
         <span className="char-c">C</span>
         <span className="char-r">R</span>
@@ -42,10 +46,20 @@ export default function Sidebar({
           <div 
             key={s.name} 
             className={`session-item ${s.name === currentSessionName ? 'active' : ''}`}
-            onClick={() => onSessionClick(s.name)}
             title={s.name}
           >
-            {s.name}
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => onSessionClick(s.name)}>
+              {s.name}
+            </span>
+            <button 
+              className="btn-delete-session"
+              onClick={(e) => {
+                e.stopPropagation(); // prevent session click
+                onDeleteSession(s.name);
+              }}
+            >
+              ✕
+            </button>
           </div>
         ))}
       </div>

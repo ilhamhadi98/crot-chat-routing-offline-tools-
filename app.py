@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-from litellm import completion, model_list
+from litellm import completion, model_list, token_counter, completion_cost
 import psutil
 import requests
 import os
@@ -194,7 +194,30 @@ def list_sessions():
 def load_session(name):
     with get_db() as conn:
         rows = conn.execute("SELECT role, content FROM messages WHERE session_name = ? ORDER BY created_at ASC", (name,)).fetchall()
-        return jsonify([dict(r) for r in rows])
+        # Also get images for user messages, if they exist
+        final_rows = []
+        for r in rows:
+            row_dict = dict(r)
+            if row_dict['role'] == 'user':
+                # This is a simplification; image data isn't stored in the DB yet
+                # In a real app, you'd fetch image URLs or base64 strings associated with the message
+                pass 
+            final_rows.append(row_dict)
+        return jsonify(final_rows)
+
+@app.route("/session/<path:session_name>", methods=["DELETE"])
+def delete_session(session_name):
+    try:
+        with get_db() as conn:
+            # Delete from all relevant tables
+            conn.execute("DELETE FROM messages WHERE session_name = ?", (session_name,))
+            conn.execute("DELETE FROM rag_kb WHERE session_name = ?", (session_name,))
+            conn.execute("DELETE FROM sessions WHERE name = ?", (session_name,))
+            conn.commit()
+        return jsonify({"status": "deleted", "session_name": session_name})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -253,8 +276,22 @@ def chat():
 
             end_time = time.time()
             process_time = round(end_time - start_time, 2)
-            tokens = len(full_reply.split()) + len(message.split()) + 50
-            cost = (tokens / 1000) * 0.00015
+            
+            # Precise token counting
+            try:
+                prompt_tokens = token_counter(model=target_model, messages=messages)
+                completion_tokens = token_counter(model=target_model, text=full_reply)
+                tokens = prompt_tokens + completion_tokens
+            except:
+                # Fallback to rough estimation if token_counter fails
+                tokens = len(full_reply.split()) + len(message.split()) + 50
+            
+            # Precise cost calculation
+            try:
+                cost = completion_cost(model=target_model, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+            except:
+                # Fallback to default cost for local/unsupported models
+                cost = (tokens / 1000) * 0.00015
             
             with get_db() as conn:
                 conn.execute("INSERT OR IGNORE INTO sessions (name) VALUES (?)", (session_name,))

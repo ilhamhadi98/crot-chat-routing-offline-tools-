@@ -110,6 +110,20 @@ export default function Home() {
     } catch (e) { console.error("Failed to load session:", e); }
   };
 
+  const handleDeleteSession = async (sessionName) => {
+    if (window.confirm(`Are you sure you want to delete session "${sessionName}"?`)) {
+      try {
+        await fetch(`${API_URL}/session/${sessionName}`, { method: 'DELETE' });
+        fetchSessions(); // Refresh the list
+        if (currentSessionName === sessionName) {
+          handleNewSession(); // Reset to a new session if the active one was deleted
+        }
+      } catch (e) {
+        console.error("Failed to delete session:", e);
+      }
+    }
+  };
+
   const handleSendMessage = async (message, images) => {
     if (isLoading) return;
     setIsLoading(true);
@@ -184,10 +198,13 @@ export default function Home() {
       <div id="overlay" style={{display: (isSidebarOpen || isStatsPanelOpen || isSettingsModalOpen) ? 'block' : 'none', position: 'fixed', width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', zIndex: 500}} onClick={() => { setSidebarOpen(false); setStatsPanelOpen(false); setSettingsModalOpen(false); }}></div>
 
       <Sidebar
+        isOpen={isSidebarOpen}
+        onClose={() => setSidebarOpen(false)}
         providers={providers} models={models} sessions={sessions}
         currentSessionName={currentSessionName} selectedProvider={selectedProvider} selectedModel={selectedModel}
         onProviderChange={handleProviderChange} onModelChange={handleModelChange} onSessionClick={handleSessionClick}
         onOpenSettings={() => setSettingsModalOpen(true)}
+        onDeleteSession={handleDeleteSession}
       />
 
       <Main
