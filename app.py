@@ -138,8 +138,9 @@ def manage_providers():
 
 @app.route("/check_connection/<name>", methods=["GET"])
 def check_connection(name):
+    name = name.lower() # Case-insensitive check
     with get_db() as conn:
-        prov = conn.execute("SELECT * FROM providers WHERE name = ?", (name,)).fetchone()
+        prov = conn.execute("SELECT * FROM providers WHERE LOWER(name) = ?", (name,)).fetchone()
     if not prov: return jsonify({"status": "error"}), 404
     
     status = "offline"
@@ -151,7 +152,6 @@ def check_connection(name):
                 status = "online"
                 found_models = [m["name"] for m in r.json().get("models", [])]
         elif name == "gemini":
-            # Fetch models using Google API directly
             r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={prov['api_key']}", timeout=5)
             if r.status_code == 200:
                 status = "online"
@@ -161,8 +161,25 @@ def check_connection(name):
             if r.status_code == 200:
                 status = "online"
                 found_models = [m["id"] for m in r.json().get("data", []) if "gpt" in m["id"]]
+        elif name == "openrouter":
+            # OpenRouter model list is public, but we can send key if available
+            headers = {}
+            if prov['api_key'] and prov['api_key'] != 'local':
+                headers["Authorization"] = f"Bearer {prov['api_key']}"
+            r = requests.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=10)
+            if r.status_code == 200:
+                status = "online"
+                all_models = r.json().get("data", [])
+                found_models = []
+                for m in all_models:
+                    m_id = m.get("id")
+                    pricing = m.get("pricing", {})
+                    # Check if model is free (pricing is "0" as string from API)
+                    if pricing.get("prompt") == "0" and pricing.get("completion") == "0":
+                        found_models.append(f"{m_id} (FREE)")
+                    else:
+                        found_models.append(m_id)
         else:
-            # Fallback check
             status = "online"
             found_models = ["default-model"]
 
@@ -171,7 +188,7 @@ def check_connection(name):
         status = "offline"
 
     with get_db() as conn:
-        conn.execute("UPDATE providers SET status = ?, available_models = ?, last_checked = CURRENT_TIMESTAMP WHERE name = ?", 
+        conn.execute("UPDATE providers SET status = ?, available_models = ?, last_checked = CURRENT_TIMESTAMP WHERE LOWER(name) = ?", 
                      (status, json.dumps(found_models), name))
         conn.commit()
     return jsonify({"status": status, "models": found_models})
@@ -224,7 +241,7 @@ def chat():
     start_time = time.time()
     data = request.json
     provider_name = data.get("provider").lower()
-    model = data.get("model")
+    model = data.get("model", "").replace(" (FREE)", "")
     message = data.get("message", "")
     session_name = data.get("session_name", "Default Session")
     history = data.get("history", [])
@@ -261,6 +278,8 @@ def chat():
                 target_model = f"gemini/{model}"
             elif provider_name == "ollama":
                 target_model = f"ollama/{model}"
+            elif provider_name == "openrouter":
+                target_model = f"openrouter/{model}"
             else:
                 target_model = model # for openai and others
             
