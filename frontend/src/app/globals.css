@@ -83,6 +83,23 @@ body {
 .logo-minecraft-3d .char-o { animation-delay: 0.5s; }
 .logo-minecraft-3d .char-t { animation-delay: 0.7s; }
 
+/* MINECRAFT LOADING CUBE */
+.loading { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 20px 0; align-self: flex-start; }
+.cube-wrapper { width: 40px; height: 40px; perspective: 800px; }
+.cube { width: 20px; height: 20px; position: relative; transform-style: preserve-3d; animation: rotateCube 3s infinite linear; margin: 10px; }
+.face { position: absolute; width: 20px; height: 20px; border: 1px solid rgba(0,0,0,0.1); }
+.top { background: #55aa33; transform: rotateX(90deg) translateZ(10px); }
+.bottom { background: #5d4037; transform: rotateX(-90deg) translateZ(10px); }
+.front { background: #8d6e63; transform: translateZ(10px); border-top: 3px solid #55aa33; }
+.back { background: #8d6e63; transform: rotateY(180deg) translateZ(10px); border-top: 3px solid #55aa33; }
+.left { background: #8d6e63; transform: rotateY(-90deg) translateZ(10px); border-top: 3px solid #55aa33; }
+.right { background: #8d6e63; transform: rotateY(90deg) translateZ(10px); border-top: 3px solid #55aa33; }
+
+@keyframes rotateCube { 
+    0% { transform: rotateX(0) rotateY(0); } 
+    100% { transform: rotateX(360deg) rotateY(360deg); } 
+}
+
 /* SIDEBAR */
 .sidebar { 
     width: 320px; background: var(--bg-sidebar); padding: 25px; 
