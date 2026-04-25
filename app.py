@@ -7,7 +7,83 @@ import os
 import json
 import time
 import sqlite3
+import subprocess
+import platform
 from datetime import datetime
+
+# --- TOOLS DEFINITION ---
+def run_shell_command(command):
+    try:
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+        return {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.returncode}
+    except Exception as e:
+        return {"error": str(e)}
+
+def read_file(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return {"content": f.read()}
+    except Exception as e:
+        return {"error": str(e)}
+
+def list_directory(path="."):
+    try:
+        return {"items": os.listdir(path)}
+    except Exception as e:
+        return {"error": str(e)}
+
+# Metadata for LiteLLM
+tools_schema = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_shell_command",
+            "description": "Execute a shell command on the local system and return the output.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "The command to run, e.g., 'dir' or 'python --version'"}
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read the content of a local file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file to read"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_directory",
+            "description": "List files and folders in a directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the directory, default is current directory"}
+                }
+            }
+        }
+    }
+]
+
+# Map names to actual functions
+available_functions = {
+    "run_shell_command": run_shell_command,
+    "read_file": read_file,
+    "list_directory": list_directory
+}
+
 
 # Coba import GPUtil untuk GPU
 try:
@@ -246,6 +322,9 @@ def chat():
     session_name = data.get("session_name", "Default Session")
     history = data.get("history", [])
 
+    # Detect OS
+    current_os = platform.system()
+
     with get_db() as conn:
         prov = conn.execute("SELECT api_key FROM providers WHERE name = ?", (provider_name,)).fetchone()
     api_key = prov['api_key'] if prov else None
@@ -259,9 +338,16 @@ def chat():
             if results: past_context = "\n---\n".join([r['content'] for r in results])
     except: pass
 
-    messages = []
+    # Base System Prompt
+    system_instruction = f"You are a powerful AI assistant with access to local system tools. " \
+                         f"You are currently running on **{current_os}**. " \
+                         f"Use appropriate commands for this OS (e.g., use 'dir' instead of 'ls' on Windows, or 'ipconfig' instead of 'ifconfig'). " \
+                         f"If a task requires local information or action, use the provided tools automatically."
+    
+    messages = [{"role": "system", "content": system_instruction}]
     if past_context:
         messages.append({"role": "system", "content": f"Past context found: {past_context}"})
+    
     for h in history:
         messages.append({"role": h["role"], "content": h["content"]})
     
@@ -274,18 +360,94 @@ def chat():
         full_reply = ""
         try:
             # LiteLLM routing
-            if provider_name == "gemini":
-                target_model = f"gemini/{model}"
-            elif provider_name == "ollama":
-                target_model = f"ollama/{model}"
-            elif provider_name == "openrouter":
-                target_model = f"openrouter/{model}"
-            else:
-                target_model = model # for openai and others
-            
+            if provider_name == "gemini": target_model = f"gemini/{model}"
+            elif provider_name == "ollama": target_model = f"ollama/{model}"
+            elif provider_name == "openrouter": target_model = f"openrouter/{model}"
+            else: target_model = model
+
+            # --- FIRST CALL: Check if tools are needed ---
             response = completion(
-                model=target_model, messages=messages, api_key=api_key if api_key != 'local' else None, stream=True
+                model=target_model, 
+                messages=messages, 
+                api_key=api_key if api_key != 'local' else None,
+                tools=tools_schema,
+                tool_choice="auto"
             )
+
+            response_message = response.choices[0].message
+            tool_calls = getattr(response_message, 'tool_calls', None)
+            content = getattr(response_message, 'content', "") or ""
+
+            # Robustness: Some models (like Qwen via Ollama) might put JSON tool calls in 'content'
+            if not tool_calls and "{" in content and "arguments" in content:
+                try:
+                    # Very simple heuristic to catch raw JSON tool calls in text
+                    potential_json = content[content.find("{"):content.rfind("}")+1]
+                    call_data = json.loads(potential_json)
+                    if "name" in call_data:
+                        # Convert raw text tool call into a formal tool call object
+                        class MockToolCall:
+                            def __init__(self, d):
+                                self.id = f"call_{int(time.time())}"
+                                self.type = "function"
+                                class MockFunc:
+                                    def __init__(self, name, args):
+                                        self.name = name
+                                        self.arguments = json.dumps(args)
+                                self.function = MockFunc(d['name'], d.get('arguments', {}))
+                            def model_dump(self):
+                                return {"id": self.id, "type": "function", "function": {"name": self.function.name, "arguments": self.function.arguments}}
+                        
+                        tool_calls = [MockToolCall(call_data)]
+                except: pass
+
+            if tool_calls:
+                # Add AI's request to history
+                if hasattr(response_message, 'model_dump'):
+                    messages.append(response_message.model_dump())
+                else:
+                    messages.append({"role": "assistant", "content": content, "tool_calls": [t.model_dump() for t in tool_calls]})
+                
+                # Execute tools
+                for tool_call in tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                    
+                    tool_msg = f"\n> 🛠️ Using tool: **{function_name}**...\n"
+                    yield f"data: {json.dumps({'text': tool_msg})}\n\n"
+                    
+                    if function_name in available_functions:
+                        function_to_call = available_functions[function_name]
+                        function_response = function_to_call(**function_args)
+                    else:
+                        function_response = {"error": f"Tool {function_name} not found"}
+                    
+                    messages.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": json.dumps(function_response),
+                    })
+                
+                # Force the model to summarize
+                messages.append({"role": "user", "content": "Great, now summarize the findings for the user based on that tool output."})
+
+                # --- SECOND CALL: Get final answer with tool data ---
+                response = completion(
+                    model=target_model, 
+                    messages=messages, 
+                    api_key=api_key if api_key != 'local' else None,
+                    stream=True
+                )
+            else:
+                # If no tools, just stream the first response (re-call with stream=True)
+                response = completion(
+                    model=target_model, 
+                    messages=messages, 
+                    api_key=api_key if api_key != 'local' else None,
+                    tools=tools_schema,
+                    stream=True
+                )
 
             for chunk in response:
                 content = chunk['choices'][0]['delta'].get('content', '')
@@ -293,24 +455,17 @@ def chat():
                     full_reply += content
                     yield f"data: {json.dumps({'text': content})}\n\n"
 
+            # (Logging logic remains the same)
             end_time = time.time()
             process_time = round(end_time - start_time, 2)
-            
-            # Precise token counting
             try:
                 prompt_tokens = token_counter(model=target_model, messages=messages)
                 completion_tokens = token_counter(model=target_model, text=full_reply)
                 tokens = prompt_tokens + completion_tokens
-            except:
-                # Fallback to rough estimation if token_counter fails
-                tokens = len(full_reply.split()) + len(message.split()) + 50
+            except: tokens = len(full_reply.split()) + len(message.split()) + 50
             
-            # Precise cost calculation
-            try:
-                cost = completion_cost(model=target_model, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
-            except:
-                # Fallback to default cost for local/unsupported models
-                cost = (tokens / 1000) * 0.00015
+            try: cost = completion_cost(model=target_model, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+            except: cost = (tokens / 1000) * 0.00015
             
             with get_db() as conn:
                 conn.execute("INSERT OR IGNORE INTO sessions (name) VALUES (?)", (session_name,))
@@ -328,6 +483,7 @@ def chat():
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream')
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
