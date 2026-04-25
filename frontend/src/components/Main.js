@@ -1,6 +1,9 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 // A sub-component for the loading animation
 function LoadingCube() {
@@ -24,6 +27,43 @@ function LoadingCube() {
   );
 }
 
+// Custom Code Block component with Copy button
+const CodeBlock = ({ language, value }) => {
+  const [copied, setCopied] = useState(false);
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ position: 'relative', margin: '15px 0', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 15px', background: '#2d2d2d', color: '#ccc', fontSize: '12px', fontFamily: 'monospace' }}>
+        <span>{language || 'code'}</span>
+        <button 
+          onClick={copyToClipboard}
+          style={{ background: 'transparent', border: 'none', color: copied ? '#4caf50' : '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
+        >
+          {copied ? '✓ Copied!' : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              Copy
+            </>
+          )}
+        </button>
+      </div>
+      <SyntaxHighlighter 
+        language={language || 'text'} 
+        style={vscDarkPlus} 
+        customStyle={{ margin: 0, padding: '15px', fontSize: '14px' }}
+      >
+        {value}
+      </SyntaxHighlighter>
+    </div>
+  );
+};
+
 // A sub-component for a single message
 function Message({ msg }) {
   const isBot = msg.role === 'assistant';
@@ -39,7 +79,29 @@ function Message({ msg }) {
   return (
     <div className={`msg ${isBot ? 'bot' : 'user'}`}>
       {msg.images && msg.images.length > 0 && <ImageGrid images={msg.images} />}
-      {msg.content && <span>{msg.content}</span>}
+      
+      <div className="markdown-content">
+        <ReactMarkdown
+          components={{
+            code({ node, inline, className, children, ...props }) {
+              const match = /language-(\w+)/.exec(className || '');
+              return !inline && match ? (
+                <CodeBlock 
+                  language={match[1]} 
+                  value={String(children).replace(/\n$/, '')} 
+                  {...props} 
+                />
+              ) : (
+                <code className={className} {...props} style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 5px', borderRadius: '4px', fontFamily: 'monospace' }}>
+                  {children}
+                </code>
+              );
+            }
+          }}
+        >
+          {msg.content}
+        </ReactMarkdown>
+      </div>
       
       {isBot && msg.meta && (
         <div className="msg-meta">
