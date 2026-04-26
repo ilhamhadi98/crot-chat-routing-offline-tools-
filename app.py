@@ -32,6 +32,23 @@ def list_directory(path="."):
     except Exception as e:
         return {"error": str(e)}
 
+def search_memory(query):
+    """Search through all past chat messages across all sessions."""
+    try:
+        with get_db() as conn:
+            # Clean query for FTS5
+            search_query = query.replace("'", "").replace('"', "")
+            results = conn.execute(
+                "SELECT content, session_name FROM rag_kb WHERE content MATCH ? LIMIT 5", 
+                (f"{search_query}*",)
+            ).fetchall()
+            if not results:
+                return {"message": "No relevant memories found for that query."}
+            return {"memories": [dict(r) for r in results]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # Metadata for LiteLLM
 tools_schema = [
     {
@@ -72,6 +89,20 @@ tools_schema = [
                 "properties": {
                     "path": {"type": "string", "description": "Path to the directory, default is current directory"}
                 }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_memory",
+            "description": "Search through all previous conversations and memories across all sessions to find relevant context from the past.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search term or topic to look for in past conversations"}
+                },
+                "required": ["query"]
             }
         }
     }
@@ -475,7 +506,9 @@ def chat():
                              (session_name, "user", message, provider_name, model, 0, 0, 0))
                 conn.execute("INSERT INTO messages (session_name, role, content, provider, model, tokens, cost, process_time) VALUES (?,?,?,?,?,?,?,?)",
                              (session_name, "assistant", full_reply, provider_name, model, tokens, cost, process_time))
-                conn.execute("INSERT INTO rag_kb (content, session_name) VALUES (?,?)", (full_reply, session_name))
+                # Store both user and assistant content in RAG for long-term memory
+                conn.execute("INSERT INTO rag_kb (content, session_name) VALUES (?,?)", (f"User said: {message}", session_name))
+                conn.execute("INSERT INTO rag_kb (content, session_name) VALUES (?,?)", (f"Assistant replied: {full_reply}", session_name))
                 conn.commit()
 
             yield f"data: {json.dumps({'done': True, 'tokens': tokens, 'cost': round(cost, 6), 'process_time': process_time, 'model': model, 'provider': provider_name})}\n\n"
