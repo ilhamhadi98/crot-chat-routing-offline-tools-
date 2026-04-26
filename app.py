@@ -369,11 +369,14 @@ def chat():
             if results: past_context = "\n---\n".join([r['content'] for r in results])
     except: pass
 
-    # Base System Prompt
-    system_instruction = f"You are a powerful AI assistant with access to local system tools. " \
+    # Base System Prompt (Proactive & Autonomous)
+    system_instruction = f"You are a highly autonomous AI engineering assistant with access to local system tools. " \
                          f"You are currently running on **{current_os}**. " \
-                         f"Use appropriate commands for this OS (e.g., use 'dir' instead of 'ls' on Windows, or 'ipconfig' instead of 'ifconfig'). " \
-                         f"If a task requires local information or action, use the provided tools automatically."
+                         f"**Autonomy Rules:** " \
+                         f"1. If a user asks for a task and a tool is missing (e.g., 'command not found'), you are AUTHORIZED to install it proactively (e.g., using 'pip install' on Windows) and then proceed with the task. " \
+                         f"2. Use appropriate commands for this OS (e.g., 'dir', 'ipconfig', 'type'). " \
+                         f"3. Do not ask for permission for non-destructive actions; just execute and report the result. " \
+                         f"4. If a task requires long-term memory, use 'search_memory' automatically."
     
     messages = [{"role": "system", "content": system_instruction}]
     if past_context:
